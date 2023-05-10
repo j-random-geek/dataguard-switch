@@ -1,0 +1,3 @@
+---
+oracle_primary_string: '{{ oracle_sid }} - Primary database'
+oracle_standby_string: '{{ oracle_dr_sid }} - Physical standby database'

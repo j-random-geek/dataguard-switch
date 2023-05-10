@@ -1,0 +1,6 @@
+---
+oracle_script_files:
+  - check_temp_files.sql
+  - count_temp_files.sql
+  - count_vdollar_tempfiles.sql
+  - db_role.sql

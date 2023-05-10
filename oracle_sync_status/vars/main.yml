@@ -1,0 +1,9 @@
+---
+
+oracle_script_files:
+  - primary_archivelog_max.sql
+  - primary_db_role.sql
+  - primary_db_status.sql
+  - secondary_archivelog_applied.sql
+  - secondary_archivelog_received.sql
+  - secondary_db_role.sql

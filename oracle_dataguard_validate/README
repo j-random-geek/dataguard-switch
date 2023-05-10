@@ -1,0 +1,63 @@
+# oracle_dataguard_validate role
+
+This role allows us to validate the DataGuard configuraiton for a given DB.
+
+## Requirements
+
+The role assumes that Ansible will either log into the database server as the `oracle` user, or that it can become `oracle` via privilege escalation (sudo or other means). The machine credential in question should guarantee this.
+
+**Please note**, however, that when using this role in Production (with an Oracle RAC cluster), it should not be applied to individual cluster nodes, but **only** the RAC SCAN hostname.
+
+### Custom Credential Type
+
+The role also requires that you set up a custom credential type (and a credential of this type) for Oracle database credentials. The configuration of this credential is as follows:
+- Name: `Oracle Database Credential`
+- Description: `For connecting via sqlplus and/or dgmgrl`
+- Input configuration:
+```
+fields:
+  - id: username
+    type: string
+    label: Username
+  - id: password
+    type: string
+    label: Password
+    secret: true
+required:
+  - username
+  - password
+```
+- Injector configuration:
+```
+env:
+  ANS_ORACLE_USER: '{{ username }}'
+  ANS_ORACLE_PASSWORD: '{{ password }}'
+```
+
+## Role variables
+- `oracle_sid` - the database ORACLE_SID to operate on
+- `oracle_dr_sid` - the ORACLE_SID of the DR database corresponding to `oracle_sid`
+- `oracle_base` - the ORACLE_BASE value for this server
+- `oracle_home` - the ORACLE_HOME value for this database
+
+## Dependencies
+
+None. This role uses only Ansible builtin modules at this point.
+
+## Example playbook
+```
+- name: Verify Oracle DataGuard set up and status
+  hosts: oracle_db_servers
+  become: true
+  become_user: "oracle"
+  gather_facts: true
+  vars:
+    ansible_pipelining: true
+  roles:
+    - role: oracle_dataguard_validate
+      vars:
+        oracle_sid: "{{ oracle_sid_prod }}"
+        oracle_dr_sid: "{{ oracle_sid_dr }}"
+        oracle_base: "/oracle/app"
+        oracle_home: "{{ oracle_base }}/product/12.2.0/dbhome_1"
+```

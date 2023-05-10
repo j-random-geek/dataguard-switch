@@ -1,0 +1,210 @@
+---
+# Tasks file for oracle_sync_status
+
+- name: Verify state of Oracle archivelog shipping
+  block:
+    - name: Create temporary directory for scripts on primary node
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: "_archivelog_status"
+      register: prod_tempdir
+
+    - name: Copy SQL files to primary DB node
+      ansible.builtin.template:
+        dest: "{{ prod_tempdir.path }}/{{ item }}"
+        src: "templates/{{ item }}"
+        mode: "0640"
+        backup: false
+        force: true
+      with_items: "{{ oracle_script_files }}"
+
+    - name: Create query script file for DB role
+      vars:
+        query_sql_file: "{{ prod_tempdir.path }}/primary_db_role.sql"
+      ansible.builtin.template:
+        dest: "{{ prod_tempdir.path }}/run_query.sh"
+        src: "templates/run_query.sh.j2"
+        mode: "0700"
+        backup: false
+        force: true
+
+    - name: Run the query for the DB role
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: {{ prod_tempdir.path }}/run_query.sh
+      register: _primary_db_role
+      changed_when: false
+
+    - name: DEBUG | Show primary DB role
+      ansible.builtin.debug:
+        var: _primary_db_role.stdout_lines
+        verbosity: 2
+
+    - name: Only continue if we actually begin on the primary
+      when:
+        - _primary_db_role.stdout_lines[-1] == "PRIMARY"
+      block:
+        - name: Create query script file for primary DB switchover status
+          vars:
+            query_sql_file: "{{ prod_tempdir.path }}/primary_db_status.sql"
+          ansible.builtin.template:
+            dest: "{{ prod_tempdir.path }}/run_query.sh"
+            src: "templates/run_query.sh.j2"
+            owner: "{{ ansible_become_user }}"
+            mode: "0700"
+            backup: false
+            force: true
+
+        - name: Run the query for primary DB switchover status
+          ansible.builtin.shell:
+            executable: /bin/bash
+            cmd: {{ prod_tempdir.path }}/run_query.sh
+          register: _primary_db_status
+          changed_when: false
+
+        - name: DEBUG | Show primary DB status
+          ansible.builtin.debug:
+            var: _primary_db_status.stdout_lines
+            verbosity: 2
+
+        - name: Assert corect state of Primary DB Role and Status
+          ansible.builtin.assert:
+            that:
+              - _primary_db_role.stdout_lines[-1] == "PRIMARY"
+              - _primary_db_status.stdout_lines[-1] == "TO STANDBY"
+            fail_msg: "Primary DB is not ready to switchover. Please consult with DBAs"
+
+        - name: Create query script for primary Archivelog sequence
+          vars:
+            query_sql_file: "{{ prod_tempdir.path }}/primary_archivelog_max.sql"
+          ansible.builtin.template:
+            dest: "{{ prod_tempdir.path }}/run_query.sh"
+            src: "templates/run_query.sh.j2"
+            owner: "{{ ansible_become_user }}"
+            mode: "0700"
+            force: true
+            backup: false
+
+        - name: Run SQL query for primary Archivelog sequence
+          ansible.builtin.shell:
+            executable: "/bin/bash"
+            cmd: "{{ prod_tempdir.path }}/run_query.sh"
+          register: _primary_archivelog_sequence
+          changed_when: false
+
+        - name: DEBUG | Show primary Archivelog sequence
+          ansible.builtin.debug:
+            var: _primary_archivelog_sequence.stdout_lines
+            verbosity: 2
+
+        - name: Confirm log shipping status on secondary
+          delegate_to: "{{ oracle_dr_host }}"
+          vars:
+            oracle_sid: "{{ oracle_dr_sid }}"
+          block:
+            - name: Create temporary directory on standby node
+              ansible.builtin.tempfile:
+                state: directory
+                suffix: "_archivelog_status"
+              register: dr_tempdir
+
+            - name: Copy query SQL files to secondary node
+              ansible.builtin.template:
+                dest: "{{ dr_tempdir.path }}/{{ item }}"
+                src: "templates/{{ item }}"
+                mode: "0640"
+                force: true
+              with_items: "{{ oracle_script_files }}"
+
+            - name: Create query script for secondary DB role
+              vars:
+                query_sql_file: "{{ dr_tempdir.path }}/secondary_db_role.sql"
+              ansible.builtin.template:
+                dest: "{{ dr_tempdir.path }}/run_query.sh"
+                src: "templates/run_query.sh.j2"
+                mode: "0700"
+                force: true
+                backup: false
+
+            - name: Run SQL query for secondary DB role
+              ansible.builtin.shell:
+                executable: "/bin/bash"
+                cmd: "{{ dr_tempdir.path }}/run_query.sh"
+              changed_when: false
+              register: _secondary_db_role
+
+            - name: DEBUG | Show secondary DB role
+              ansible.builtin.debug:
+                var: _secondary_db_role.stdout_lines
+                verbosity: 2
+
+            - name: Assert that secondary DB is in correct state
+              ansible.builtin.assert:
+                that:
+                  - _secondary_db_role.stdout_lines[-1] == "MOUNTED"
+                fail_msg: "Secondary DB is not in MOUNTED state - please check with DBAs"
+
+            - name: Create query script for secondary archivelog received
+              vars:
+                query_sql_file: "{{ dr_tempdir.path }}/secondary_archivelog_received.sql"
+              ansible.builtin.template:
+                dest: "{{ dr_tempdir.path }}/run_query.sh"
+                src: "templates/run_query.sh.j2"
+                mode: "0700"
+                force: true
+                backup: false
+
+            - name: Run SQL query for secondary archivelog received
+              ansible.builtin.shell:
+                executable: "/bin/bash"
+                cmd: "{{ dr_tempdir.path }}/run_query.sh"
+              changed_when: false
+              register: _secondary_archivelog_max_received
+
+            - name: DEBUG | Show max archivelog received
+              ansible.builtin.debug:
+                var: _secondary_archivelog_max_received.stdout_lines
+                verbosity: 2
+
+            - name: Create query script for secondary archivelog applied
+              vars:
+                query_sql_file: "{{ dr_tempdir.path }}/secondary_archivelog_applied.sql"
+              ansible.builtin.template:
+                dest: "{{ dr_tempdir.path }}/run_query.sh"
+                src: "templates/run_query.sh.j2"
+                mode: "0700"
+                force: true
+                backup: false
+
+            - name: Run SQL query for secondary archivelog applied
+              ansible.builtin.shell:
+                executable: "/bin/bash"
+                cmd: "{{ dr_tempdir.path }}/run_query.sh"
+              changed_when: false
+              register: _secondary_archivelog_max_applied
+
+            - name: DEBUG | Show max archivelog applied
+              ansible.builtin.debug:
+                var: _secondary_archivelog_max_applied.stdout_lines
+                verbosity: 2
+
+            - name: Assert that the primary and secondary archivelogs are in sync
+              ansible.builtin.assert:
+                that:
+                  - _primary_archivelog_sequence.stdout_lines[-1] == _secondary_archivelog_max_received.stdout_lines[-1]
+                  - _primary_archivelog_sequence.stdout_lines[-1] == _secondary_archivelog_max_applied.stdout_lines[-1]
+                fail_msg: "Primary archivelog {{ _primary_archivelog_sequence.stdout_lines[-1] }} has either not been received {{ _secondary_archivelog_max_received.stdout_lines[-1] }} or not been applied {{ _secondary_archivelog_max_applied.stdout_lines[-1] }}"
+
+  always:
+    - name: Cleanup | Remove script files on primary node
+      ansible.builtin.file:
+        path: "{{ prod_tempdir.path }}"
+        state: absent
+      when: prod_tempdir.path is defined
+
+    - name: Cleanup | Remove script files on standby node
+      delegate_to: "{{ oracle_dr_host }}"
+      ansible.builtin.file:
+        path: "{{ dr_tempdir.path }}"
+        state: absent
+      when: dr_tempdir.path is defined

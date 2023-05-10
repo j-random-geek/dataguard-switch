@@ -1,0 +1,27 @@
+---
+- name: db_status.yml {{ item }} | Create script from template
+  vars:
+    dgmgrl_command: "show database {{ item }}"
+  ansible.builtin.template:
+    src: "templates/run_query.sh.j2"
+    dest: "{{ my_tempdir.path }}/run_query.sh"
+    mode: "0700"
+    force: true
+
+- name: db_status.yml {{ item }} | Run status script
+  ansible.builtin.command:
+    cmd: "{{ my_tempdir.path }}/run_query.sh"
+    stdin: "{{ lookup('ansible.builtin.env', 'ANS_ORACLE_PASSWORD') | quote }}"
+  no_log: true
+  changed_when: false
+  register: _dgmgrl_db_info
+
+- name: DEBUG db_status.yml {{ item }} | Verify output is  OK
+  ansible.builtin.debug:
+    var: _dgmgrl_db_info.stdout_lines
+    verbosity: 2
+
+- name: db_status.yml {{ item }} | Assure that DB is OK
+  ansible.builtin.assert:
+    that:
+      - '"SUCCESS" in _dgmgrl_db_info.stdout_lines[-1]'

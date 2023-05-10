@@ -1,0 +1,118 @@
+---
+# Tasks file for oracle_check_tempfiles
+
+- name: Verify Oracle temporary tablespace files
+  block:
+    - name: Create temporary script directory
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: "_check_tempfiles"
+      register: my_tempdir
+
+    - name: Copy SQL query files
+      ansible.builtin.template:
+        src: "templates/{{ item }}"
+        dest: "{{ my_tempdir.path }}/{{ item }}"
+        mode: "0640"
+        force: true
+      with_items: "{{ oracle_script_files }}"
+
+    - name: Ascertain whether or not this is the active (primary) DB
+      ansible.builtin.shell:
+        executable: "/bin/bash"
+        cmd: |
+          ORACLE_SID="{{ oracle_sid }}"
+          ORACLE_BASE="{{ oracle_base }}"
+          ORACLE_HOME="{{ oracle_home }}"
+          PATH="$PATH:{{ oracle_home }}/bin"
+          LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:{{ oracle_home }}/lib"
+          ORAENV_ASK="NO"
+          export ORACLE_SID ORACLE_BASE ORACLE_HOME ORAENV_ASK PATH LD_LIBRARY_PATH
+          . oraenv > /dev/null
+          sqlplus -S "/ as sysdba" @{{ my_tempdir.path }}/db_role.sql
+      register: _db_role
+      changed_when: false
+    
+    - name: DEBUG | Show DB role
+      ansible.builtin.debug:
+        var: _db_role
+        verbosity: 2
+    
+    - name: Run temporary tablespace queries ONLY on primary DB
+      when:
+        - _db_role.stdout_lines[-1] == "PRIMARY"
+      block:
+        - name: List all tempfiles
+          ansible.builtin.shell:
+            executable: "/bin/bash"
+            cmd: |
+              ORACLE_SID="{{ oracle_sid }}"
+              ORACLE_BASE="{{ oracle_base }}"
+              ORACLE_HOME="{{ oracle_home }}"
+              PATH="$PATH:{{ oracle_home }}/bin"
+              LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:{{ oracle_home }}/lib"
+              ORAENV_ASK="NO"
+              export ORACLE_SID ORACLE_BASE ORACLE_HOME ORAENV_ASK PATH LD_LIBRARY_PATH
+              . oraenv > /dev/null
+              sqlplus -S "/ as sysdba" @{{ my_tempdir.path }}/check_temp_files.sql
+          register: _tempfiles_list
+          changed_when: false
+    
+        - name: Show list of tempfiles on {{ inventory_hostname }}
+          ansible.builtin.debug:
+            var: _tempfiles_list.stdout_lines
+    
+        - name: Count of tempfiles in both dba_temp_files and v$tempfile
+          ansible.builtin.shell:
+            executable: "/bin/bash"
+            cmd: |
+              ORACLE_SID="{{ oracle_sid }}"
+              ORACLE_BASE="{{ oracle_base }}"
+              ORACLE_HOME="{{ oracle_home }}"
+              PATH="$PATH:{{ oracle_home }}/bin"
+              LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:{{ oracle_home }}/lib"
+              ORAENV_ASK="NO"
+              export ORACLE_SID ORACLE_BASE ORACLE_HOME ORAENV_ASK PATH LD_LIBRARY_PATH
+              . oraenv > /dev/null
+              sqlplus -S "/ as sysdba" @{{ my_tempdir.path }}/count_temp_files.sql
+          register: _tempfiles_count_join
+          changed_when: false
+    
+        - name: DEBUG | Show count of tempfiles in both tables
+          ansible.builtin.debug:
+            var: _tempfiles_count_join.stdout_lines
+            verbosity: 2
+    
+        - name: Count tempfiles in v$tempfile
+          ansible.builtin.shell:
+            executable: "/bin/bash"
+            cmd: |
+              ORACLE_SID="{{ oracle_sid }}"
+              ORACLE_BASE="{{ oracle_base }}"
+              ORACLE_HOME="{{ oracle_home }}"
+              PATH="$PATH:{{ oracle_home }}/bin"
+              LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:{{ oracle_home }}/lib"
+              ORAENV_ASK="NO"
+              export ORACLE_SID ORACLE_BASE ORACLE_HOME ORAENV_ASK PATH LD_LIBRARY_PATH
+              . oraenv > /dev/null
+              sqlplus -S "/ as sysdba" @{{ my_tempdir.path }}/count_vdollar_tempfiles.sql
+          register: _tempfiles_count_vdollartempfiles
+          changed_when: false
+    
+        - name: DEBUG | Show count of tempfiles in v$tempfiles
+          ansible.builtin.debug:
+            var: _tempfiles_count_vdollartempfiles.stdout_lines
+            verbosity: 2
+    
+        - name: Check that the results match
+          ansible.builtin.assert:
+            that:
+              - _tempfiles_count_join.stdout_lines[-1] == _tempfiles_count_vdollartempfiles.stdout_lines[-1]
+            fail_msg: "Temporary tablespace files for {{ oracle_sid }} DO NOT MATCH UP - please have a DBA investigate"
+
+  always:
+    - name: Cleanup | Remove SQL script files
+      ansible.builtin.file:
+        path: "{{ my_tempdir.path }}"
+        state: absent
+      when: my_tempdir.path is defined

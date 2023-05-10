@@ -1,0 +1,134 @@
+---
+# Tasks for oracle_dataguard_switchover
+
+- name: DataGuard switchover
+  block:
+    - name: Get DataGuard configuration | Create temporary directory for scripts
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: "_dataguard_switchover"
+      register: my_tempdir
+
+    - name: Get DataGuard configuration | create script from template
+      vars:
+        dgmgrl_command: "show configuration"
+      ansible.builtin.template:
+        src: "templates/run_query.sh.j2"
+        dest: "{{ my_tempdir.path }}/run_query.sh"
+        mode: "0700"
+        force: true
+    
+    - name: Get DataGuard configuration | Run script
+      ansible.builtin.command:
+        cmd: "{{ my_tempdir.path }}/run_query.sh"
+        stdin: "{{ lookup('ansible.builtin.env', 'ANS_ORACLE_PASSWORD') | quote }}"
+      no_log: true
+      register: _dgmgrl_configuration
+      changed_when: false
+    
+    - name: DEBUG | Show DataGuard configuration
+      ansible.builtin.debug:
+        var: _dgmgrl_configuration.stdout_lines
+        verbosity: 2
+    
+    - name: Assertion for correct DataGuard configuration
+      ansible.builtin.assert:
+        that:
+          - '"{{ oracle_sid }}" in _dgmgrl_configuration.stdout'
+          - '"{{ oracle_dr_sid }}" in _dgmgrl_configuration.stdout'
+          - '"SUCCESS" in _dgmgrl_configuration.stdout_lines[-1]'
+        success_msg: Conditions look good - proceeding to evaluate work to be done
+        fail_msg: DataGuard configuration state is not correct - please consult DBA team
+    
+    - name: Switch over to database {{ oracle_dr_sid }} if it is not already primary
+      vars:
+        _pre_primary_string: "{{ oracle_sid }} - Primary database"
+        _pre_standby_string: "{{ oracle_dr_sid }} - Physical standby database"
+        _post_primary_string: "{{ oracle_dr_sid }} - Primary database"
+        _post_standby_string: "{{ oracle_sid }} - Physical standby database"
+      when:
+        - '_pre_primary_string in _dgmgrl_configuration.stdout'
+        - '_pre_standby_string in _dgmgrl_configuration.stdout'
+      block:
+        - name: Run switchover | Create script from template
+          vars:
+            dgmgrl_command: "switchover to {{ oracle_dr_sid }}"
+          ansible.builtin.template:
+            src: "templates/run_query.sh.j2"
+            dest: "{{ my_tempdir.path }}/run_query.sh"
+            mode: "0700"
+            force: true
+    
+        - name: Run switchover | Run switchover script
+          ansible.builtin.command:
+            cmd: "{{ my_tempdir.path }}/run_query.sh"
+            stdin: "{{ lookup('ansible.builtin.env', 'ANS_ORACLE_PASSWORD') | quote }}"
+          no_log: true
+          register: _dgmgrl_switchover_output
+    
+        - name: DEBUG | Show switchover output
+          ansible.builtin.debug:
+            var: _dgmgrl_switchover_output.stdout_lines
+            verbosity: 2
+    
+        - name: Run switchover | Assert success
+          ansible.builtin.assert:
+            that:
+              - '"Switchover succeeded" in _dgmgrl_switchover_output.stdout_lines[-1]'
+    
+        - name: Run switchover | Sleep 60 seconds to allow DataGuard to tidy up
+          ansible.builtin.pause:
+            seconds: 60
+    
+        - name: Verify switchover | Create script from template
+          vars:
+            dgmgrl_command: "show configuration"
+          ansible.builtin.template:
+            src: "templates/run_query.sh.j2"
+            dest: "{{ my_tempdir.path }}/run_query.sh"
+            mode: "0700"
+            force: true
+    
+        - name: Verify switchover | Run script and confirm OK
+          ansible.builtin.command:
+            cmd: "{{ my_tempdir.path }}/run_query.sh"
+            stdin: "{{ lookup('ansible.builtin.env', 'ANS_ORACLE_PASSWORD') | quote }}"
+          no_log: true
+          register: _dgmgrl_output
+          until:
+            - '_post_primary_string in _dgmgrl_output.stdout'
+            - '_post_standby_string in _dgmgrl_output.stdout'
+            - '"SUCCESS" in _dgmgrl_output.stdout_lines[-1]'
+          retries: 120
+          delay: 30
+          changed_when: false
+
+  rescue:
+    - name: Recovery - obtain and show current DataGuard configuration
+      block:
+        - name: Recovery | Create script from template
+          vars:
+            dgmgrl_command: "show configuration"
+          ansible.builtin.template:
+            src: "templates/run_query.sh.j2"
+            dest: "{{ my_tempdir.path }}/run_query.sh"
+            mode: "0700"
+            force: true
+
+        - name: Recovery | Run script
+          ansible.builtin.command:
+            cmd: "{{ my_tempdir.path }}/run_query.sh"
+            stdin: "{{ lookup('ansible.builtin.env', 'ANS_ORACLE_PASSWORD') | quote }}"
+          no_log: true
+          register: _dgmgrl_output
+
+        - name: Recovery | Display current DataGuard configuration
+          ansible.builtin.debug:
+            var: _dgmgrl_output.stdout
+
+  always:
+    - name: Cleanup script files
+      ansible.builtin.file:
+        path: "{{ my_tempdir.path }}"
+        state: absent
+      when: my_tempdir.path is defined

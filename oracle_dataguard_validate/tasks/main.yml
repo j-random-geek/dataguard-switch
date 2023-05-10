@@ -1,0 +1,63 @@
+---
+# Tasks file for oracle_dataguard_validate
+- name: Validate DataGuard configuration
+  block:
+    - name: DataGuard config | Create temporary directory for scripts
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: "_dataguard_validate"
+      register: my_tempdir
+
+    - name: DataGuard config | Create script from template
+      vars:
+        dgmgrl_command: "show configuration"
+      ansible.builtin.template:
+        src: "templates/run_query.sh.j2"
+        dest: "{{ my_tempdir.path }}/run_query.sh"
+        mode: "0700"
+        force: true
+
+    - name: DataGuard config | Run script
+      ansible.builtin.command:
+        cmd: "{{ my_tempdir.path }}/run_query.sh"
+        stdin: "{{ lookup('ansible.builtin.env', 'ANS_ORACLE_PASSWORD') | quote }}"
+      no_log: true
+      changed_when: false
+      ignore_errors: true
+      register: _dgmgrl_configuration
+      until:
+        - 'oracle_sid in _dgmgrl_configuration.stdout'
+        - 'oracle_dr_sid in _dgmgrl_configuration.stdout'
+        - '"SUCCESS" in _dgmgrl_configuration.stdout_lines[-1]'
+      retries: 30
+      delay: 10
+
+    - name: DEBUG | Verify output is  OK
+      ansible.builtin.debug:
+        var: _dgmgrl_configuration.stdout
+        verbosity: 2
+
+    - name: Verify individual DB status
+      include_tasks: "db_status.yml"
+      with_items:
+        - "{{ oracle_sid }}"
+        - "{{ oracle_dr_sid }}"
+      when:
+        - 'oracle_primary_string in _dgmgrl_configuration.stdout'
+        # We only do this when we are on the primary node, otherwise
+        # we get an error
+
+  rescue:
+    # Show the current configuration if an error has occurred
+    - name: Rescue | Show DataGuard configuration
+      ansible.builtin.debug:
+        var: _dgmgrl_configuration.stdout
+      when:
+        - _dgmgrl_configuration is defined
+
+  always:
+    - name: Cleanup | Remove query scripts
+      ansible.builtin.file:
+        path: "{{ my_tempdir.path }}"
+        state: absent
+      when: my_tempdir.path is defined

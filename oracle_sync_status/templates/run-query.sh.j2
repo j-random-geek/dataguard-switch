@@ -1,0 +1,11 @@
+#!/bin/bash
+
+ORACLE_BASE="{{ oracle_base }}"
+ORACLE_HOME="{{ oracle_home }}"
+ORACLE_SID="{{ oracle_sid }}"
+ORAENV_ASK="NO"
+PATH="{{ oracle_home }}/bin:${PATH}"
+LD_LIBRARY_PATH="{{ oracle_home }}/lib:${LD_LIBRARY_PATH}"
+export ORACLE_BASE ORACLE_HOME ORACLE_SID ORAENV_ASK PATH LD_LIBRARY_PATH
+. oraenv > /dev/null
+sqlplus -S "/ as sysdba" @{{ query_sql_file }}
