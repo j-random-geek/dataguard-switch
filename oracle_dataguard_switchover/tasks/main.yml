@@ -21,7 +21,7 @@
     - name: Get DataGuard configuration | Run script
       ansible.builtin.command:
         cmd: "{{ my_tempdir.path }}/run_query.sh"
-        stdin: "{{ lookup('ansible.builtin.env', 'ANS_ORACLE_PASSWORD') | quote }}"
+        stdin: "{{ lookup('ansible.builtin.env', 'ANS_ORACLE_PASSWORD') }}"
       no_log: true
       register: _dgmgrl_configuration
       changed_when: false
@@ -62,7 +62,7 @@
         - name: Run switchover | Run switchover script
           ansible.builtin.command:
             cmd: "{{ my_tempdir.path }}/run_query.sh"
-            stdin: "{{ lookup('ansible.builtin.env', 'ANS_ORACLE_PASSWORD') | quote }}"
+            stdin: "{{ lookup('ansible.builtin.env', 'ANS_ORACLE_PASSWORD') }}"
           no_log: true
           register: _dgmgrl_switchover_output
     
@@ -92,7 +92,7 @@
         - name: Verify switchover | Run script and confirm OK
           ansible.builtin.command:
             cmd: "{{ my_tempdir.path }}/run_query.sh"
-            stdin: "{{ lookup('ansible.builtin.env', 'ANS_ORACLE_PASSWORD') | quote }}"
+            stdin: "{{ lookup('ansible.builtin.env', 'ANS_ORACLE_PASSWORD') }}"
           no_log: true
           register: _dgmgrl_output
           until:
@@ -118,7 +118,7 @@
         - name: Recovery | Run script
           ansible.builtin.command:
             cmd: "{{ my_tempdir.path }}/run_query.sh"
-            stdin: "{{ lookup('ansible.builtin.env', 'ANS_ORACLE_PASSWORD') | quote }}"
+            stdin: "{{ lookup('ansible.builtin.env', 'ANS_ORACLE_PASSWORD') }}"
           no_log: true
           register: _dgmgrl_output
 

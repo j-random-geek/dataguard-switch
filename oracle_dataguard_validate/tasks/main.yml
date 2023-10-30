@@ -20,7 +20,7 @@
     - name: DataGuard config | Run script
       ansible.builtin.command:
         cmd: "{{ my_tempdir.path }}/run_query.sh"
-        stdin: "{{ lookup('ansible.builtin.env', 'ANS_ORACLE_PASSWORD') | quote }}"
+        stdin: "{{ lookup('ansible.builtin.env', 'ANS_ORACLE_PASSWORD') }}"
       no_log: true
       changed_when: false
       ignore_errors: true

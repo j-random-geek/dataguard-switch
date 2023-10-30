@@ -11,7 +11,7 @@
 - name: db_status.yml {{ item }} | Run status script
   ansible.builtin.command:
     cmd: "{{ my_tempdir.path }}/run_query.sh"
-    stdin: "{{ lookup('ansible.builtin.env', 'ANS_ORACLE_PASSWORD') | quote }}"
+    stdin: "{{ lookup('ansible.builtin.env', 'ANS_ORACLE_PASSWORD') }}"
   no_log: true
   changed_when: false
   register: _dgmgrl_db_info
